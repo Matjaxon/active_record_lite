@@ -4,51 +4,45 @@ require 'active_support/inflector'
 
 # Phase IIIa
 class AssocOptions
-  attr_accessor(
-    :foreign_key,
-    :class_name,
-    :primary_key
-  )
+  attr_accessor :foreign_key, :class_name, :primary_key
 
   def model_class
-    Object::const_get(@name.classify)  #Finds the existing class if it exsits.
-  end
-
-  def foreign_key
-    foreign_key_string = ActiveSupport::Inflector.underscore(@name)
-    @options[:foreign_key] ||= "#{foreign_key_string}_id".to_sym
-  end
-
-  def primary_key
-    @options[:primary_key] ||= "id".to_sym
-  end
-
-  def class_name
-    class_name_string = ActiveSupport::Inflector.classify(@name)
-    @options[:class_name] ||= class_name_string
+    @class_name.constantize
   end
 
   def table_name
-    model_class.table_name ||= ActiveSupport::Inflector.tableize(@name)
+    model_class.table_name
   end
 end
 
 class BelongsToOptions < AssocOptions
   def initialize(name, options = {})
-    @name = name
-    @options = options
+
+    defaults = {
+      :foreign_key => "#{name}_id".to_sym,
+      :primary_key => :id,
+      :class_name => "#{name}".camelcase
+    }
+
+    defaults.keys.each do |key|
+      self.send("#{key}=", options[key] || defaults[key])
+    end
+
   end
 end
 
 class HasManyOptions < AssocOptions
   def initialize(name, self_class_name, options = {})
-    self_class_options = BelongsToOptions.new(self_class_name, options)
+    defaults = {
+      :foreign_key => "#{self_class_name.to_s.downcase}_id".to_sym,
+      :primary_key => :id,
+      :class_name => "#{name}".camelcase.singularize
+    }
 
-    @name = name
-    @options = options
-
-    @options[:primary_key] ||= self_class_options.primary_key
-    @options[:foreign_key] ||= self_class_options.foreign_key
+    # Longhand version of the self.send("#{keys}=", ...) method above
+    self.primary_key = options[:primary_key] ||= defaults[:primary_key]
+    self.foreign_key = options[:foreign_key] ||= defaults[:foreign_key]
+    self.class_name =  options[:class_name]  ||= defaults[:class_name]
   end
 end
 
@@ -56,16 +50,18 @@ module Associatable
   # Phase IIIb
   def belongs_to(name, options = {})
     options = BelongsToOptions.new(name, options)
-    p options
-    p options.model_class
-    # p self
-    # define_method "#{name}" do
-    #   options.class_name.model_class.where()
-    # end
+    define_method (name) do
+      foreign_key_value = self.send(options.foreign_key)
+      options.model_class.where(id: foreign_key_value).first
+    end
   end
 
   def has_many(name, options = {})
-    # ...
+    options = HasManyOptions.new(name, self, options)
+    define_method(name) do
+      foreign_key_value = self.id
+      options.model_class.where(options.foreign_key => foreign_key_value)
+    end
   end
 
   def assoc_options
